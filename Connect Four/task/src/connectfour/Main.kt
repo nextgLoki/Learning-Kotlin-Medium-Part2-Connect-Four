@@ -22,9 +22,10 @@ class Game(
     private val board = MutableList(columnsCount) {
         MutableList(rowsCount) { BoardCell.EMPTY }
     }
+    private var lastChangedCell = -1 to -1
     private var isGameOver = false
     private var isForceEnd = false
-    private var currentGameNumber = 0
+    private var currentGameNumber = 1
 
     private val players = listOf(
         Player(playerName1, BoardCell.DISC_PLAYER1, 0),
@@ -37,13 +38,13 @@ class Game(
     private fun printGameState() =
         StringBuilder("${players[0].name} VS ${players[1].name}")
             .appendLine("\n$rowsCount X $columnsCount board")
-            .append(if (gamesCount == 1) "Single game" else "Total $gamesCount games").let(::println)
+            .append(if (gamesCount == 1) "Single game" else "Total $gamesCount games")
+            .let(::println)
 
     private fun drawBoard() {
-        val title = List(columnsCount) {
-            it + 1
-        }.joinToString(separator = " ", prefix = " ")
-        println(title)
+        List(columnsCount) { it + 1 }
+            .joinToString(separator = " ", prefix = " ")
+            .let(::println)
 
         repeat(rowsCount) {
             board.forEach { columns -> print("║${columns[rowsCount - 1 - it].item}") }
@@ -54,18 +55,16 @@ class Game(
     }
 
     private fun selectNextPlayer() {
-        if (currentPlayerIndex + 1 >= players.size) {
-            currentPlayerIndex = 0
-        } else {
-            currentPlayerIndex++
-        }
+        currentPlayerIndex = (currentPlayerIndex + 1) % players.size
     }
 
     private fun addDiscOnBoard(column: Int): Boolean {
-        val columnDiscs = board[column - 1]
+        val columnIndex = column - 1
+        val columnDiscs = board[columnIndex]
         val firstEmptyCell = columnDiscs.indexOfFirst { it == BoardCell.EMPTY }
         if (firstEmptyCell >= 0) {
             columnDiscs[firstEmptyCell] = currentPlayer.disc
+            lastChangedCell = columnIndex to firstEmptyCell
             return true
         }
         return false
@@ -96,92 +95,37 @@ class Game(
         }
     }
 
-    private fun isVerticalWin() = board.any {
-        it.joinToString("").contains(currentPlayer.disc.toString().repeat(WIN_CELLS_COUNT))
+    private fun getDiscsInRow(way: Pair<Int, Int>): Int {
+        val playerCellType = currentPlayer.disc.item
+        var count = 0
+        var pos = lastChangedCell
+        while (pos.first in 0 until columnsCount && pos.second in 0 until rowsCount) {
+            if (board[pos.first][pos.second].item == playerCellType) {
+                count++
+            } else {
+                break
+            }
+            pos = pos.first + way.first to pos.second + way.second
+        }
+        return count
     }
 
-    private fun isHorizontalWin(): Boolean {
-        var countInRow: Int
-        val playerCellType = currentPlayer.disc.item
-        repeat(rowsCount) { rowIndex ->
-            countInRow = 0
-            repeat(columnsCount) { columnIndex ->
-                if (board[columnIndex][rowIndex].item == playerCellType) {
-                    countInRow++
-                    if (countInRow == WIN_CELLS_COUNT) {
-                        return true
-                    }
-                } else {
-                    countInRow = 0
-                }
+    private fun isPlayerWin(): Boolean {
+        listOf(
+            Pair(0 to 1, 0 to -1), // vertical win line
+            Pair(1 to 0, -1 to 0), // horizontal win line
+            Pair(1 to 1, -1 to -1), // diagonal win line
+            Pair(1 to -1, -1 to 1), // another diagonal win line
+        ).forEach {
+            if (getDiscsInRow(it.first) + getDiscsInRow(it.second) - 1 >= WIN_CELLS_COUNT) {
+                return true
             }
         }
         return false
     }
 
-    private fun isDiagonallyWin(): Boolean {
-        val winLines = mutableMapOf<Pair<Int, Int>, MutableList<Pair<Int, Int>>>()
-
-        // top border
-        for (i in 0..columnsCount - WIN_CELLS_COUNT) {
-            val lines = mutableListOf<Pair<Int, Int>>()
-            winLines[i to 0] = lines
-            for (columnIndex in i until columnsCount) {
-                for (rowIndex in 0 until rowsCount) {
-                    if (columnIndex - rowIndex == i)
-                        lines.add(columnIndex to rowIndex)
-                }
-            }
-        }
-
-        // right border
-        val rightBorderIndex = columnsCount - 1
-        for (j in 0..rowsCount - WIN_CELLS_COUNT) {
-            val lines = mutableListOf<Pair<Int, Int>>()
-            winLines[rightBorderIndex to j] = lines
-            for (columnIndex in rightBorderIndex downTo 0) {
-                for (rowIndex in j until rowsCount) {
-                    if (columnIndex + rowIndex == rightBorderIndex)
-                        lines.add(columnIndex to rowIndex)
-                }
-            }
-        }
-
-        // bottom border
-        val bottomBorderIndex = columnsCount - 1
-        for (i in WIN_CELLS_COUNT - 1 until columnsCount) {
-            val lines = mutableListOf<Pair<Int, Int>>()
-            winLines[i to bottomBorderIndex] = lines
-            for (columnIndex in i downTo 0) {
-                for (rowIndex in rowsCount - 1 downTo 0) {
-                    if (columnIndex - rowIndex == i - bottomBorderIndex)
-                        lines.add(columnIndex to rowIndex)
-                }
-            }
-        }
-
-        // left border
-        for (j in WIN_CELLS_COUNT - 1 until rowsCount) {
-            val lines = mutableListOf<Pair<Int, Int>>()
-            winLines[0 to j] = lines
-            for (columnIndex in 0 until columnsCount) {
-                for (rowIndex in j downTo 0) {
-                    if (rowIndex + columnIndex == j)
-                        lines.add(columnIndex to rowIndex)
-                }
-            }
-        }
-
-        val winningCells = currentPlayer.disc.toString().repeat(WIN_CELLS_COUNT)
-        return winLines.any {
-            it.value.joinToString("") { indexes ->
-                board[indexes.first][indexes.second].item.toString()
-            }.contains(winningCells)
-        }
-    }
-
     private fun processGameOver() {
-        if (isHorizontalWin() || isVerticalWin() || isDiagonallyWin()) {
+        if (isPlayerWin()) {
             with(currentPlayer) {
                 println("Player $name won")
                 points += 2
@@ -189,23 +133,18 @@ class Game(
             isGameOver = true
         } else if (board.flatten().all { it != BoardCell.EMPTY }) {
             println("It is a draw")
-            players.forEach {
-                it.points += 1
-            }
+            players.forEach { it.points += 1 }
             isGameOver = true
         }
     }
 
     private fun getPlayerScoresLine(index: Int) = "${players[index].name}: ${players[index].points}"
 
-    private fun resetBoard() = board.forEach {
-        it.fill(BoardCell.EMPTY)
-    }
+    private fun resetBoard() = board.forEach { it.fill(BoardCell.EMPTY) }
 
     fun play() {
         printGameState()
         do {
-            currentGameNumber++
             if (gamesCount > 1) {
                 println("Game #$currentGameNumber")
             }
@@ -226,7 +165,7 @@ class Game(
                 isGameOver = false
                 isForceEnd = false
             }
-        } while (currentGameNumber < gamesCount)
+        } while (currentGameNumber++ < gamesCount)
         println("Game over!")
     }
 }
@@ -271,15 +210,13 @@ fun requestBoardSize(): Pair<Int, Int> {
             return 6 to 7
         }
 
-        val entries = Regex("\\s*(\\d+)\\s*[x|X]\\s*(\\d+)\\s*").matchEntire(input)
+        val entries = Regex("""\s*(\d+)\s*[xX]\s*(\d+)\s*""").matchEntire(input)
         if (entries == null) {
             println("Invalid input")
         } else {
             val size = entries.destructured.let { (rows, columns) ->
-                {
-                    rows.toInt() to columns.toInt()
-                }
-            }.invoke()
+                rows.toInt() to columns.toInt()
+            }
 
             if (size.first !in 5..9) {
                 println("Board rows should be from 5 to 9")
